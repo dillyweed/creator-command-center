@@ -48,8 +48,13 @@ export function putStats(stats) {
 export function refreshStats(stats) {
   return post("/api/stats/refresh", { stats });
 }
-export function analyzeStats(stats, period) {
-  return post("/api/stats/analyze", { stats, period });
+export function analyzeStats(stats, period, accounts = {}) {
+  return post("/api/stats/analyze", {
+    stats,
+    period,
+    tiktokUsername: accounts.tiktok,
+    instagramUsername: accounts.instagram,
+  });
 }
 
 export const API_BASE = BASE;
