@@ -48,8 +48,8 @@ export function putStats(stats) {
 export function refreshStats(stats) {
   return post("/api/stats/refresh", { stats });
 }
-export function analyzeStats(stats) {
-  return post("/api/stats/analyze", { stats });
+export function analyzeStats(stats, period) {
+  return post("/api/stats/analyze", { stats, period });
 }
 
 export const API_BASE = BASE;
