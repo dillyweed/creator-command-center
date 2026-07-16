@@ -49,13 +49,23 @@ function MetricCard({ label, value, sub, children }) {
   );
 }
 
-function PlatformCard({ icon, name, handle, data, editing, onChange, period }) {
+function PlatformCard({ icon, name, username, onUsername, data, editing, onChange, period }) {
   return (
     <div className="flex-1 rounded-[10px] border border-bd bg-s2 p-5">
       <div className="mb-3.5 flex items-center gap-2 border-b border-bd pb-3.5">
         <i className={`ti ${icon} text-[19px] text-accent`} aria-hidden="true" />
         <span className="text-[14px] font-semibold text-tp">{name}</span>
-        {handle && <span className="text-[11px] text-tm">{handle}</span>}
+        <div className="flex min-w-0 flex-1 items-center gap-1 text-tm">
+          <span className="text-[12px]">@</span>
+          <input
+            value={username}
+            onChange={(e) => onUsername(e.target.value.replace(/^@/, ""))}
+            placeholder="username"
+            spellCheck={false}
+            autoCapitalize="none"
+            className="w-full min-w-0 bg-transparent text-[12px] text-ts outline-none placeholder:text-tm focus:text-tp"
+          />
+        </div>
       </div>
       {PLATFORM_FIELDS.map((f) => (
         <div key={f.k} className="mb-2.5 flex items-center justify-between last:mb-0">
@@ -100,6 +110,20 @@ export default function Dashboard() {
   function changePeriod(p) {
     setPeriod(p);
     localStorage.setItem("cc-period", p);
+  }
+  const [accounts, setAccounts] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("cc-accounts") || "{}");
+    } catch {
+      return {};
+    }
+  });
+  function setAccount(pf, v) {
+    setAccounts((a) => {
+      const next = { ...a, [pf]: v };
+      localStorage.setItem("cc-accounts", JSON.stringify(next));
+      return next;
+    });
   }
 
   // On mount: learn which integrations are live and load persisted stats.
@@ -175,17 +199,30 @@ export default function Dashboard() {
   }
 
   async function analyze() {
+    if (!accounts.tiktok && !accounts.instagram) {
+      setSyncMsg("Enter a TikTok or Instagram username first");
+      return;
+    }
     setAnalyzing(true);
     setSyncMsg("");
     try {
-      const { stats: merged, analysis, sources } = await analyzeStats(stats, Number(period));
+      const { stats: merged, analysis, sources, pulled } = await analyzeStats(
+        stats,
+        Number(period),
+        accounts
+      );
       setStats(merged);
       saveStats(merged);
       setBreakdown({ analysis, sources });
       setShowBreakdown(true);
-      setSyncMsg(`Analytics filled your stats · views = last ${period} days`);
+      const accurate =
+        pulled &&
+        (pulled.tiktok === "apify" || pulled.instagram === "apify");
+      setSyncMsg(
+        `${accurate ? "Live stats pulled" : "Estimated stats"} · views = last ${period} days`
+      );
     } catch (e) {
-      setSyncMsg("Analytics lookup failed (is the backend running with an API key?)");
+      setSyncMsg("Analytics lookup failed (check usernames / backend)");
     } finally {
       setAnalyzing(false);
     }
@@ -381,7 +418,8 @@ export default function Dashboard() {
             <PlatformCard
               icon="ti-brand-tiktok"
               name="TikTok"
-              handle="@dylanwallaceyt"
+              username={accounts.tiktok || ""}
+              onUsername={(v) => setAccount("tiktok", v)}
               data={view.tiktok}
               editing={editing}
               period={period}
@@ -390,7 +428,8 @@ export default function Dashboard() {
             <PlatformCard
               icon="ti-brand-instagram"
               name="Instagram"
-              handle="@dylanwalllace"
+              username={accounts.instagram || ""}
+              onUsername={(v) => setAccount("instagram", v)}
               data={view.instagram}
               editing={editing}
               period={period}
