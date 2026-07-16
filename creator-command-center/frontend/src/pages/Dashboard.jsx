@@ -49,7 +49,7 @@ function MetricCard({ label, value, sub, children }) {
   );
 }
 
-function PlatformCard({ icon, name, handle, data, editing, onChange }) {
+function PlatformCard({ icon, name, handle, data, editing, onChange, period }) {
   return (
     <div className="flex-1 rounded-[10px] border border-bd bg-s2 p-5">
       <div className="mb-3.5 flex items-center gap-2 border-b border-bd pb-3.5">
@@ -61,7 +61,7 @@ function PlatformCard({ icon, name, handle, data, editing, onChange }) {
         <div key={f.k} className="mb-2.5 flex items-center justify-between last:mb-0">
           <div className="flex items-center gap-1.5 text-[12px] text-ts">
             <i className={`ti ${f.icon} text-[13px] text-tm`} aria-hidden="true" />
-            {f.label}
+            {f.k === "views" ? `Views (${period}d)` : f.label}
           </div>
           {editing ? (
             <input
@@ -94,6 +94,13 @@ export default function Dashboard() {
   const [analyzing, setAnalyzing] = useState(false);
   const [breakdown, setBreakdown] = useState(null);
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [period, setPeriod] = useState(
+    () => localStorage.getItem("cc-period") || "28"
+  );
+  function changePeriod(p) {
+    setPeriod(p);
+    localStorage.setItem("cc-period", p);
+  }
 
   // On mount: learn which integrations are live and load persisted stats.
   // Any failure (backend down, etc.) silently keeps the localStorage values.
@@ -171,12 +178,12 @@ export default function Dashboard() {
     setAnalyzing(true);
     setSyncMsg("");
     try {
-      const { stats: merged, analysis, sources } = await analyzeStats(stats);
+      const { stats: merged, analysis, sources } = await analyzeStats(stats, Number(period));
       setStats(merged);
       saveStats(merged);
       setBreakdown({ analysis, sources });
       setShowBreakdown(true);
-      setSyncMsg("Analytics filled your stats · views = last 30 days");
+      setSyncMsg(`Analytics filled your stats · views = last ${period} days`);
     } catch (e) {
       setSyncMsg("Analytics lookup failed (is the backend running with an API key?)");
     } finally {
@@ -218,7 +225,20 @@ export default function Dashboard() {
             </button>
           </div>
         ) : (
-          <div className="flex flex-shrink-0 flex-wrap justify-end gap-2">
+          <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+            <div className="flex items-center rounded-lg border border-bd2 p-0.5" role="group" aria-label="Stats time range">
+              {["7", "28"].map((p) => (
+                <button
+                  key={p}
+                  onClick={() => changePeriod(p)}
+                  className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                    period === p ? "bg-accent text-white" : "text-ts hover:text-tp"
+                  }`}
+                >
+                  {p}D
+                </button>
+              ))}
+            </div>
             <button
               onClick={analyze}
               disabled={analyzing}
@@ -290,7 +310,7 @@ export default function Dashboard() {
             <MetricCard
               label="Total views"
               value={fmt(totalViews(view))}
-              sub="TikTok + Instagram"
+              sub={`Last ${period} days · TikTok + IG`}
             />
             <MetricCard
               label="Total followers"
@@ -364,6 +384,7 @@ export default function Dashboard() {
               handle="@dylanwallaceyt"
               data={view.tiktok}
               editing={editing}
+              period={period}
               onChange={(k, v) => setPlatform("tiktok", k, v)}
             />
             <PlatformCard
@@ -372,6 +393,7 @@ export default function Dashboard() {
               handle="@dylanwalllace"
               data={view.instagram}
               editing={editing}
+              period={period}
               onChange={(k, v) => setPlatform("instagram", k, v)}
             />
           </div>
