@@ -165,6 +165,9 @@ router.post("/analyze", async (req, res) => {
   }
 
   const base = { ...EMPTY, ...(req.body?.stats || {}) };
+  // Time window for "views": 7 or 28 days (default 28). Controlled by the
+  // dashboard's period toggle.
+  const period = [7, 28].includes(Number(req.body?.period)) ? Number(req.body.period) : 28;
   // Fresh social fields; keep only revenue/deals from the baseline.
   const merged = {
     ...EMPTY,
@@ -213,7 +216,7 @@ router.post("/analyze", async (req, res) => {
     const prompt =
       "Look up my public channels and report my current stats. TikTok @dylanwallaceyt and Instagram @dylanwalllace. " +
       "FIRST find my FOLLOWER COUNT on each platform - it is public on the profile and on stat sites, so always return a follower number (estimate if you must, and label it). " +
-      "THEN find my recent videos with view counts and dates, sum the last-30-day views into MONTHLY VIEWS per platform, and estimate engagement rate (percent) and posts per week. " +
+      `THEN find my recent videos with view counts and dates, sum the views of posts from the last ${period} days into PERIOD VIEWS per platform, and estimate engagement rate (percent) and posts per week. ` +
       "List what you found with links. Give best estimates and label them - never refuse and never leave a platform blank.";
 
     const r = await runMessage({
@@ -233,7 +236,7 @@ router.post("/analyze", async (req, res) => {
         model: MODEL_SUBBOT,
         max_tokens: 500,
         system:
-          "Extract the reported numbers into the report_stats tool. Use the last-30-days figure for monthly_views and percentages as plain numbers. OMIT any field the analysis did not determine.",
+          `Extract the reported numbers into the report_stats tool. Use the last-${period}-days view total for monthly_views and percentages as plain numbers. OMIT any field the analysis did not determine.`,
         tools: [REPORT_TOOL],
         tool_choice: { type: "tool", name: "report_stats" },
         messages: [{ role: "user", content: analysis }],
@@ -273,7 +276,7 @@ router.post("/analyze", async (req, res) => {
   }
 
   if (sbConfigured()) await saveSnapshot(merged, "analytics");
-  res.json({ stats: merged, analysis, sources, pulled });
+  res.json({ stats: merged, analysis, sources, pulled, period });
 });
 
 export default router;
