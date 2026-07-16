@@ -189,7 +189,7 @@ export default function Dashboard() {
 
   return (
     <>
-      <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-bd bg-s1 px-6 py-4">
+      <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-bd bg-s1 px-4 py-4 md:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <i
             className="ti ti-layout-dashboard text-[22px] text-accent"
@@ -228,7 +228,7 @@ export default function Dashboard() {
                 className={`ti ${analyzing ? "ti-loader-2 animate-spin" : "ti-sparkles"} text-[13px]`}
                 aria-hidden="true"
               />
-              {analyzing ? "Looking up…" : "Fill with Analytics"}
+              <span className="hidden sm:inline">{analyzing ? "Looking up…" : "Fill with Analytics"}</span>
             </button>
             <button
               onClick={refresh}
@@ -239,19 +239,19 @@ export default function Dashboard() {
                 className={`ti ti-refresh text-[13px] ${refreshing ? "animate-spin" : ""}`}
                 aria-hidden="true"
               />
-              {refreshing ? "Syncing…" : "Refresh"}
+              <span className="hidden sm:inline">{refreshing ? "Syncing…" : "Refresh"}</span>
             </button>
             <button
               onClick={startEdit}
               className="flex items-center gap-1.5 rounded-lg border border-bd2 px-3.5 py-1.5 text-[11px] text-ts transition-colors hover:bg-s2 hover:text-tp"
             >
-              <i className="ti ti-edit text-[13px]" aria-hidden="true" /> Update stats
+              <i className="ti ti-edit text-[13px]" aria-hidden="true" /> <span className="hidden sm:inline">Update stats</span>
             </button>
           </div>
         )}
       </header>
 
-      <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-6">
+      <div className="flex flex-1 flex-col gap-5 overflow-y-auto p-4 md:p-6">
         {breakdown && (
           <section className="rounded-[10px] border border-accent/25 bg-accent/[0.04]">
             <button

@@ -98,7 +98,7 @@ export default function BotView({ botId }) {
 
   return (
     <>
-      <header className="flex flex-shrink-0 items-center justify-between border-b border-bd bg-s1 px-6 py-4">
+      <header className="flex flex-shrink-0 items-center justify-between border-b border-bd bg-s1 px-4 py-4 md:px-6">
         <div className="flex items-center gap-3">
           <i className={`ti ${bot.icon} text-[22px] text-accent`} aria-hidden="true" />
           <div>
@@ -122,7 +122,7 @@ export default function BotView({ botId }) {
       </header>
 
       {/* Messages */}
-      <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto p-6">
+      <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto p-4 md:p-6">
         {history.length === 0 && !loading ? (
           <div className="flex h-full flex-col items-center justify-center gap-2.5 opacity-40">
             <i className={`ti ${bot.icon} text-4xl text-tm`} aria-hidden="true" />
@@ -182,7 +182,7 @@ export default function BotView({ botId }) {
       </div>
 
       {/* Input */}
-      <div className="flex-shrink-0 border-t border-bd bg-s1 px-6 pb-5 pt-3.5">
+      <div className="flex-shrink-0 border-t border-bd bg-s1 px-4 md:px-6 pb-5 pt-3.5">
         <div className="flex items-end gap-2.5 rounded-[10px] border border-bd2 bg-s2 px-3 py-2.5 focus-within:border-accent/40">
           <textarea
             ref={inputRef}
