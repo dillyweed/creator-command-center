@@ -12,6 +12,11 @@ import {
 } from "../services/supabase.js";
 import { getClient, MODEL_SUBBOT, runMessage } from "../anthropic.js";
 import { BOTS } from "../bots.js";
+import {
+  fetchTikTok as apifyTikTok,
+  fetchInstagram as apifyInstagram,
+  isConfigured as apifyConfigured,
+} from "../services/apify.js";
 
 const router = Router();
 
@@ -157,18 +162,26 @@ const num = (v) => (typeof v === "number" && !Number.isNaN(v) ? v : null);
 //      (it prioritizes the always-public follower counts).
 //   3. Extract the web numbers and fill any field the APIs didn't provide.
 // body: { stats? } (baseline; revenue/deals are preserved). -> { stats, analysis, sources, pulled }
+// POST /api/stats/analyze
+// Accurate, username-only stats for ANY creator. Uses Apify actors first
+// (exact scrape of the public profile) and falls back to a web-search estimate
+// when Apify isn't configured or a lookup fails.
+// body: { tiktokUsername?, instagramUsername?, period?, stats? }
+// -> { stats, analysis, sources, pulled, period }
 router.post("/analyze", async (req, res) => {
-  if (!getClient()) {
-    return res
-      .status(503)
-      .json({ error: "Server is missing ANTHROPIC_API_KEY. Add it to .env." });
+  if (!getClient() && !apifyConfigured()) {
+    return res.status(503).json({
+      error: "Server needs ANTHROPIC_API_KEY (estimates) or APIFY_TOKEN (accurate).",
+    });
   }
 
-  const base = { ...EMPTY, ...(req.body?.stats || {}) };
-  // Time window for "views": 7 or 28 days (default 28). Controlled by the
-  // dashboard's period toggle.
   const period = [7, 28].includes(Number(req.body?.period)) ? Number(req.body.period) : 28;
-  // Fresh social fields; keep only revenue/deals from the baseline.
+  const base = { ...EMPTY, ...(req.body?.stats || {}) };
+  const handles = {
+    tiktok: String(req.body?.tiktokUsername || "").trim().replace(/^@/, ""),
+    instagram: String(req.body?.instagramUsername || "").trim().replace(/^@/, ""),
+  };
+
   const merged = {
     ...EMPTY,
     revenue: base.revenue ?? "",
@@ -177,106 +190,121 @@ router.post("/analyze", async (req, res) => {
     instagram: { ...EMPTY.instagram },
   };
   const pulled = { tiktok: "none", instagram: "none" };
-
-  // 1. Official APIs first (exact when tokens exist).
-  await Promise.all([
-    (async () => {
-      try {
-        const t = await fetchTikTokStats();
-        if (t.configured) {
-          pulled.tiktok = "api";
-          if (num(t.followers)) merged.tiktok.followers = t.followers;
-          if (num(t.views)) merged.tiktok.views = t.views;
-          if (num(t.engagement)) merged.tiktok.engagement = t.engagement;
-        }
-      } catch (e) {
-        console.warn("[stats/analyze] tiktok api:", e?.message);
-      }
-    })(),
-    (async () => {
-      try {
-        const i = await fetchInstagramStats();
-        if (i.configured) {
-          pulled.instagram = "api";
-          if (num(i.followers)) merged.instagram.followers = i.followers;
-          if (num(i.views)) merged.instagram.views = i.views;
-          if (num(i.engagement)) merged.instagram.engagement = i.engagement;
-        }
-      } catch (e) {
-        console.warn("[stats/analyze] instagram api:", e?.message);
-      }
-    })(),
-  ]);
-
-  let analysis = "";
+  const analysisParts = [];
   let sources = [];
 
-  // 2. Web-search analytics for the narrative + to fill any gaps.
-  try {
-    const prompt =
-      "Look up my public channels and report my current stats. TikTok @dylanwallaceyt and Instagram @dylanwalllace. " +
-      "FIRST find my FOLLOWER COUNT on each platform - it is public on the profile and on stat sites, so always return a follower number (estimate if you must, and label it). " +
-      `THEN find my recent videos with view counts and dates, sum the views of posts from the last ${period} days into PERIOD VIEWS per platform, and estimate engagement rate (percent) and posts per week. ` +
-      "List what you found with links. Give best estimates and label them - never refuse and never leave a platform blank.";
+  const fmtN = (n) => {
+    const v = Number(n) || 0;
+    if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+    if (v >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+    return String(v);
+  };
+  const applyApify = (pf, r) => {
+    merged[pf].followers = r.followers;
+    merged[pf].views = r.views;
+    if (r.engagement) merged[pf].engagement = r.engagement;
+    if (r.postsPerWeek != null) merged[pf].posts = r.postsPerWeek;
+    pulled[pf] = "apify";
+    const label = pf === "tiktok" ? "TikTok" : "Instagram";
+    const lines = (r.recentPosts || [])
+      .map((p) => {
+        const d = p.createdAt ? new Date(p.createdAt).toISOString().slice(0, 10) : "—";
+        const v = p.views != null ? fmtN(p.views) + " views" : "no view count";
+        return `- ${d} · ${v} · ${fmtN(p.likes)} likes${p.url ? " — " + p.url : ""}`;
+      })
+      .join("\n");
+    analysisParts.push(
+      `## ${label} @${handles[pf]} — live scrape (accurate)\n` +
+        `Followers: ${fmtN(r.followers)}\n` +
+        `Views (last ${period}d): ${fmtN(r.views)}\n` +
+        `Engagement: ${r.engagement || 0}%\n` +
+        `Posts/week: ${r.postsPerWeek ?? "—"}\n` +
+        (lines ? `Recent posts:\n${lines}` : "")
+    );
+  };
 
-    const r = await runMessage({
-      system: BOTS.analytics.system,
-      messages: [{ role: "user", content: prompt }],
-      model: MODEL_SUBBOT,
-      maxTokens: 1600,
-      webSearch: true,
-    });
-    analysis = r.text;
-    sources = r.sources;
+  // 1. Apify first (accurate). Only for platforms with a username supplied.
+  if (apifyConfigured()) {
+    const [tk, ig] = await Promise.all([
+      handles.tiktok ? apifyTikTok(handles.tiktok, period) : Promise.resolve({ ok: false }),
+      handles.instagram ? apifyInstagram(handles.instagram, period) : Promise.resolve({ ok: false }),
+    ]);
+    if (tk.ok) applyApify("tiktok", tk);
+    else if (handles.tiktok) pulled.tiktok = "failed";
+    if (ig.ok) applyApify("instagram", ig);
+    else if (handles.instagram) pulled.instagram = "failed";
+  }
 
-    // 3. Extract numbers, fill only the fields the APIs did not already set.
-    let extracted = { tiktok: {}, instagram: {} };
+  // 2. Web-search estimate for any platform Apify didn't cover.
+  const needEstimate = ["tiktok", "instagram"].filter(
+    (pf) => handles[pf] && pulled[pf] !== "apify"
+  );
+  if (needEstimate.length && getClient()) {
+    const targets = needEstimate
+      .map((pf) => `${pf === "tiktok" ? "TikTok" : "Instagram"} @${handles[pf]}`)
+      .join(" and ");
     try {
-      const ext = await getClient().messages.create({
+      const prompt =
+        `Look up ${targets} and report current stats. ` +
+        `FIRST find the FOLLOWER COUNT (public, always return a number, estimate if needed). ` +
+        `THEN find recent videos with view counts and dates, sum the last ${period} days into PERIOD VIEWS, and estimate engagement rate (percent) and posts per week. ` +
+        `List what you found with links. Give best estimates and label them; never leave a platform blank.`;
+      const r = await runMessage({
+        system: BOTS.analytics.system,
+        messages: [{ role: "user", content: prompt }],
         model: MODEL_SUBBOT,
-        max_tokens: 500,
-        system:
-          `Extract the reported numbers into the report_stats tool. Use the last-${period}-days view total for monthly_views and percentages as plain numbers. OMIT any field the analysis did not determine.`,
-        tools: [REPORT_TOOL],
-        tool_choice: { type: "tool", name: "report_stats" },
-        messages: [{ role: "user", content: analysis }],
+        maxTokens: 1400,
+        webSearch: true,
       });
-      const tu = ext.content.find((b) => b.type === "tool_use");
-      if (tu?.input) extracted = tu.input;
-    } catch (e) {
-      console.warn("[stats/analyze] extraction failed:", e?.message);
-    }
+      sources = r.sources || [];
+      analysisParts.push(
+        `## Estimates via web search (${needEstimate.join(", ")})\n${r.text}`
+      );
 
-    for (const pf of ["tiktok", "instagram"]) {
-      const e = extracted[pf] || {};
-      if (merged[pf].followers === "" && num(e.followers) !== null) {
-        merged[pf].followers = e.followers;
-        if (pulled[pf] === "none") pulled[pf] = "estimate";
+      let extracted = { tiktok: {}, instagram: {} };
+      try {
+        const ext = await getClient().messages.create({
+          model: MODEL_SUBBOT,
+          max_tokens: 500,
+          system: `Extract the reported numbers into the report_stats tool. Use the last-${period}-days view total for monthly_views and percentages as plain numbers. OMIT any field the analysis did not determine.`,
+          tools: [REPORT_TOOL],
+          tool_choice: { type: "tool", name: "report_stats" },
+          messages: [{ role: "user", content: r.text }],
+        });
+        const tu = ext.content.find((b) => b.type === "tool_use");
+        if (tu?.input) extracted = tu.input;
+      } catch (e) {
+        console.warn("[stats/analyze] extraction failed:", e?.message);
       }
-      if (merged[pf].views === "" && num(e.monthly_views) !== null) {
-        merged[pf].views = e.monthly_views;
-        if (pulled[pf] === "none") pulled[pf] = "estimate";
+      for (const pf of needEstimate) {
+        const e = extracted[pf] || {};
+        if (merged[pf].followers === "" && num(e.followers) !== null) merged[pf].followers = e.followers;
+        if (merged[pf].views === "" && num(e.monthly_views) !== null) merged[pf].views = e.monthly_views;
+        if (merged[pf].engagement === "" && num(e.engagement) !== null) merged[pf].engagement = e.engagement;
+        if (merged[pf].posts === "" && num(e.posts_per_week) !== null) merged[pf].posts = e.posts_per_week;
+        if (merged[pf].followers !== "" || merged[pf].views !== "") pulled[pf] = "estimate";
       }
-      if (merged[pf].engagement === "" && num(e.engagement) !== null) {
-        merged[pf].engagement = e.engagement;
-      }
-      if (merged[pf].posts === "" && num(e.posts_per_week) !== null) {
-        merged[pf].posts = e.posts_per_week;
-      }
-    }
-  } catch (err) {
-    console.error("[stats/analyze] web lookup failed:", err?.message || err);
-    // If the APIs already filled numbers we still return them below; only fail
-    // hard when we have nothing at all.
-    const gotAnything =
-      merged.tiktok.followers !== "" || merged.instagram.followers !== "";
-    if (!gotAnything) {
-      return res.status(502).json({ error: "Analytics lookup failed." });
+    } catch (err) {
+      console.error("[stats/analyze] web lookup failed:", err?.message || err);
     }
   }
 
-  if (sbConfigured()) await saveSnapshot(merged, "analytics");
-  res.json({ stats: merged, analysis, sources, pulled, period });
+  const gotAnything =
+    merged.tiktok.followers !== "" || merged.instagram.followers !== "";
+  if (!gotAnything) {
+    return res.status(502).json({
+      error: "Couldn't pull stats. Check the usernames, or add an APIFY_TOKEN for accurate data.",
+    });
+  }
+
+  if (sbConfigured()) await saveSnapshot(merged, "analyze");
+  res.json({
+    stats: merged,
+    analysis: analysisParts.join("\n\n"),
+    sources,
+    pulled,
+    period,
+  });
 });
 
 export default router;
