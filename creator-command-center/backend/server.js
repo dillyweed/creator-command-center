@@ -4,6 +4,7 @@ import cors from "cors";
 import chatRouter from "./src/routes/chat.js";
 import orchestrateRouter from "./src/routes/orchestrate.js";
 import statsRouter from "./src/routes/stats.js";
+import authRouter from "./src/routes/auth.js";
 
 const app = express();
 const PORT = process.env.PORT || 8787;
@@ -39,6 +40,9 @@ app.use("/api/orchestrate", orchestrateRouter);
 // Stats: manual save + auto-refresh from TikTok/Instagram, persisted to
 // Supabase when configured. Step 7.
 app.use("/api/stats", statsRouter);
+
+// OAuth connect flow (TikTok Login Kit + Instagram via Facebook Login).
+app.use("/api/auth", authRouter);
 
 app.use((_req, res) => res.status(404).json({ error: "Not found" }));
 
