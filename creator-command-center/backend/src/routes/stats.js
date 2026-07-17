@@ -17,6 +17,7 @@ import {
   fetchInstagram as apifyInstagram,
   isConfigured as apifyConfigured,
 } from "../services/apify.js";
+import { getConnection, fetchViaConnection } from "../services/oauth.js";
 
 const router = Router();
 
@@ -169,9 +170,13 @@ const num = (v) => (typeof v === "number" && !Number.isNaN(v) ? v : null);
 // body: { tiktokUsername?, instagramUsername?, period?, stats? }
 // -> { stats, analysis, sources, pulled, period }
 router.post("/analyze", async (req, res) => {
-  if (!getClient() && !apifyConfigured()) {
+  const conns = {
+    tiktok: req.body?.tiktokConn || "",
+    instagram: req.body?.instagramConn || "",
+  };
+  if (!getClient() && !apifyConfigured() && !conns.tiktok && !conns.instagram) {
     return res.status(503).json({
-      error: "Server needs ANTHROPIC_API_KEY (estimates) or APIFY_TOKEN (accurate).",
+      error: "Server needs a connected account, APIFY_TOKEN, or ANTHROPIC_API_KEY.",
     });
   }
 
@@ -223,11 +228,46 @@ router.post("/analyze", async (req, res) => {
     );
   };
 
-  // 1. Apify first (accurate). Only for platforms with a username supplied.
+  const applyOfficial = (pf, r) => {
+    merged[pf].followers = r.followers;
+    merged[pf].views = r.views;
+    if (r.engagement) merged[pf].engagement = r.engagement;
+    if (r.postsPerWeek != null) merged[pf].posts = r.postsPerWeek;
+    pulled[pf] = "oauth";
+    const label = pf === "tiktok" ? "TikTok" : "Instagram";
+    analysisParts.push(
+      `## ${label} - official API (connected account)\n` +
+        `Followers: ${fmtN(r.followers)}\n` +
+        `Views (last ${period}d): ${fmtN(r.views)}\n` +
+        `Engagement: ${r.engagement || 0}%\n` +
+        `Posts/week: ${r.postsPerWeek ?? "-"}`
+    );
+  };
+
+  // 0. OAuth connections first (official, most accurate).
+  for (const pf of ["tiktok", "instagram"]) {
+    if (!conns[pf]) continue;
+    try {
+      const conn = await getConnection(conns[pf]);
+      if (conn && conn.platform === pf) {
+        const r = await fetchViaConnection(conn, period);
+        if (r.ok) applyOfficial(pf, r);
+        else pulled[pf] = "failed";
+      }
+    } catch (e) {
+      console.warn(`[analyze] oauth ${pf}:`, e?.message);
+    }
+  }
+
+  // 1. Apify next (accurate by username). Skip platforms already connected.
   if (apifyConfigured()) {
     const [tk, ig] = await Promise.all([
-      handles.tiktok ? apifyTikTok(handles.tiktok, period) : Promise.resolve({ ok: false }),
-      handles.instagram ? apifyInstagram(handles.instagram, period) : Promise.resolve({ ok: false }),
+      handles.tiktok && pulled.tiktok !== "oauth"
+        ? apifyTikTok(handles.tiktok, period)
+        : Promise.resolve({ ok: false }),
+      handles.instagram && pulled.instagram !== "oauth"
+        ? apifyInstagram(handles.instagram, period)
+        : Promise.resolve({ ok: false }),
     ]);
     if (tk.ok) applyApify("tiktok", tk);
     else if (handles.tiktok) pulled.tiktok = "failed";
@@ -237,7 +277,7 @@ router.post("/analyze", async (req, res) => {
 
   // 2. Web-search estimate for any platform Apify didn't cover.
   const needEstimate = ["tiktok", "instagram"].filter(
-    (pf) => handles[pf] && pulled[pf] !== "apify"
+    (pf) => handles[pf] && pulled[pf] !== "apify" && pulled[pf] !== "oauth"
   );
   if (needEstimate.length && getClient()) {
     const targets = needEstimate
