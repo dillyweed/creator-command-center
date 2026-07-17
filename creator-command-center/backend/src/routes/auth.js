@@ -4,7 +4,7 @@ import {
   authUrl,
   newConnKey,
   decodeState,
-  exchangeTikTok,
+  exchangeTikTokAuto,
   exchangeInstagram,
   saveConnection,
 } from "../services/oauth.js";
@@ -35,7 +35,8 @@ router.get("/:platform", (req, res) => {
 // to the frontend with the connection key so the browser can remember it.
 router.get("/:platform/callback", async (req, res) => {
   const { platform } = req.params;
-  const { code, state, error } = req.query;
+  const { state, error } = req.query;
+  const code = req.query.code || req.query.auth_code;
   const back = (params) =>
     res.redirect(`${FRONTEND}/?${new URLSearchParams(params)}`);
 
@@ -49,7 +50,7 @@ router.get("/:platform/callback", async (req, res) => {
   try {
     const conn =
       platform === "tiktok"
-        ? await exchangeTikTok(String(code))
+        ? await exchangeTikTokAuto(String(code))
         : await exchangeInstagram(String(code));
     await saveConnection({ conn_key: connKey, ...conn });
     return back({ [`${platform}_conn`]: connKey });
