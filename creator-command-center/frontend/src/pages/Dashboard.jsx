@@ -13,6 +13,7 @@ import {
   putStats,
   refreshStats,
   analyzeStats,
+  connectUrl,
 } from "../lib/api.js";
 import Sources from "../components/Sources.jsx";
 import { BOTS } from "../data/bots.js";
@@ -49,23 +50,48 @@ function MetricCard({ label, value, sub, children }) {
   );
 }
 
-function PlatformCard({ icon, name, username, onUsername, data, editing, onChange, period }) {
+function PlatformCard({ icon, name, username, onUsername, data, editing, onChange, period, connected, onConnect, onDisconnect }) {
   return (
     <div className="flex-1 rounded-[10px] border border-bd bg-s2 p-5">
-      <div className="mb-3.5 flex items-center gap-2 border-b border-bd pb-3.5">
-        <i className={`ti ${icon} text-[19px] text-accent`} aria-hidden="true" />
-        <span className="text-[14px] font-semibold text-tp">{name}</span>
-        <div className="flex min-w-0 flex-1 items-center gap-1 text-tm">
-          <span className="text-[12px]">@</span>
-          <input
-            value={username}
-            onChange={(e) => onUsername(e.target.value.replace(/^@/, ""))}
-            placeholder="username"
-            spellCheck={false}
-            autoCapitalize="none"
-            className="w-full min-w-0 bg-transparent text-[12px] text-ts outline-none placeholder:text-tm focus:text-tp"
-          />
+      <div className="mb-3.5 border-b border-bd pb-3.5">
+        <div className="flex items-center gap-2">
+          <i className={`ti ${icon} text-[19px] text-accent`} aria-hidden="true" />
+          <span className="text-[14px] font-semibold text-tp">{name}</span>
+          {connected ? (
+            <div className="ml-auto flex items-center gap-2">
+              <span className="flex items-center gap-1 text-[11px] text-success">
+                <i className="ti ti-circle-check-filled text-[13px]" aria-hidden="true" />
+                Connected
+              </span>
+              <button
+                onClick={onDisconnect}
+                className="text-[10px] text-tm hover:text-ts"
+              >
+                Disconnect
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onConnect}
+              className="ml-auto flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90"
+            >
+              <i className={`ti ${icon} text-[12px]`} aria-hidden="true" /> Connect
+            </button>
+          )}
         </div>
+        {!connected && (
+          <div className="mt-2 flex min-w-0 items-center gap-1 text-tm">
+            <span className="text-[11px]">or fallback @</span>
+            <input
+              value={username}
+              onChange={(e) => onUsername(e.target.value.replace(/^@/, ""))}
+              placeholder="username"
+              spellCheck={false}
+              autoCapitalize="none"
+              className="w-full min-w-0 bg-transparent text-[12px] text-ts outline-none placeholder:text-tm focus:text-tp"
+            />
+          </div>
+        )}
       </div>
       {PLATFORM_FIELDS.map((f) => (
         <div key={f.k} className="mb-2.5 flex items-center justify-between last:mb-0">
@@ -125,6 +151,35 @@ export default function Dashboard() {
       return next;
     });
   }
+  const [conns, setConns] = useState(() => ({
+    tiktok: localStorage.getItem("cc-conn-tiktok") || "",
+    instagram: localStorage.getItem("cc-conn-instagram") || "",
+  }));
+  function setConn(pf, key) {
+    setConns((c) => ({ ...c, [pf]: key }));
+    if (key) localStorage.setItem(`cc-conn-${pf}`, key);
+    else localStorage.removeItem(`cc-conn-${pf}`);
+  }
+  // Capture the OAuth callback (?tiktok_conn=... / ?instagram_error=...) once.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    let touched = false;
+    for (const pf of ["tiktok", "instagram"]) {
+      const key = q.get(`${pf}_conn`);
+      const err = q.get(`${pf}_error`);
+      const name = pf === "tiktok" ? "TikTok" : "Instagram";
+      if (key) {
+        setConn(pf, key);
+        setSyncMsg(`${name} connected`);
+        touched = true;
+      }
+      if (err) {
+        setSyncMsg(`${name} connect failed: ${err}`);
+        touched = true;
+      }
+    }
+    if (touched) window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   // On mount: learn which integrations are live and load persisted stats.
   // Any failure (backend down, etc.) silently keeps the localStorage values.
@@ -199,8 +254,8 @@ export default function Dashboard() {
   }
 
   async function analyze() {
-    if (!accounts.tiktok && !accounts.instagram) {
-      setSyncMsg("Enter a TikTok or Instagram username first");
+    if (!accounts.tiktok && !accounts.instagram && !conns.tiktok && !conns.instagram) {
+      setSyncMsg("Connect an account or enter a username first");
       return;
     }
     setAnalyzing(true);
@@ -209,7 +264,8 @@ export default function Dashboard() {
       const { stats: merged, analysis, sources, pulled } = await analyzeStats(
         stats,
         Number(period),
-        accounts
+        accounts,
+        conns
       );
       setStats(merged);
       saveStats(merged);
@@ -217,7 +273,9 @@ export default function Dashboard() {
       setShowBreakdown(true);
       const accurate =
         pulled &&
-        (pulled.tiktok === "apify" || pulled.instagram === "apify");
+        ["apify", "oauth"].some(
+          (m) => pulled.tiktok === m || pulled.instagram === m
+        );
       setSyncMsg(
         `${accurate ? "Live stats pulled" : "Estimated stats"} · views = last ${period} days`
       );
@@ -420,6 +478,9 @@ export default function Dashboard() {
               name="TikTok"
               username={accounts.tiktok || ""}
               onUsername={(v) => setAccount("tiktok", v)}
+              connected={Boolean(conns.tiktok)}
+              onConnect={() => (window.location.href = connectUrl("tiktok"))}
+              onDisconnect={() => setConn("tiktok", "")}
               data={view.tiktok}
               editing={editing}
               period={period}
@@ -430,6 +491,9 @@ export default function Dashboard() {
               name="Instagram"
               username={accounts.instagram || ""}
               onUsername={(v) => setAccount("instagram", v)}
+              connected={Boolean(conns.instagram)}
+              onConnect={() => (window.location.href = connectUrl("instagram"))}
+              onDisconnect={() => setConn("instagram", "")}
               data={view.instagram}
               editing={editing}
               period={period}
