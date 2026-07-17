@@ -12,6 +12,14 @@
 // otherwise an in-memory Map (fine for a single instance while testing).
 
 import crypto from "node:crypto";
+import {
+  businessConfigured,
+  businessAuthUrl,
+  exchangeBusiness,
+  refreshBusiness,
+  fetchBusinessStats,
+  isExpired,
+} from "./tiktok-business.js";
 
 const TT_CLIENT_KEY = process.env.TIKTOK_CLIENT_KEY || "";
 const TT_CLIENT_SECRET = process.env.TIKTOK_CLIENT_SECRET || "";
@@ -29,7 +37,8 @@ export function redirectUri(platform) {
 
 export function isConfigured(platform) {
   if (!REDIRECT_BASE) return false;
-  if (platform === "tiktok") return Boolean(TT_CLIENT_KEY && TT_CLIENT_SECRET);
+  if (platform === "tiktok")
+    return Boolean((TT_CLIENT_KEY && TT_CLIENT_SECRET) || businessConfigured());
   if (platform === "instagram") return Boolean(META_APP_ID && META_APP_SECRET);
   return false;
 }
@@ -96,6 +105,9 @@ export function decodeState(state) {
 
 export function authUrl(platform, connKey) {
   const state = encodeState(connKey);
+  if (platform === "tiktok" && businessConfigured()) {
+    return businessAuthUrl(state, redirectUri("tiktok"));
+  }
   if (platform === "tiktok") {
     const p = new URLSearchParams({
       client_key: TT_CLIENT_KEY,
@@ -121,6 +133,10 @@ export function authUrl(platform, connKey) {
 }
 
 // ---- code exchange + fetch ----------------------------------------------
+export async function exchangeTikTokAuto(code) {
+  return businessConfigured() ? exchangeBusiness(code) : exchangeTikTok(code);
+}
+
 export async function exchangeTikTok(code) {
   const body = new URLSearchParams({
     client_key: TT_CLIENT_KEY,
@@ -203,7 +219,17 @@ export async function exchangeInstagram(code) {
 export async function fetchViaConnection(conn, periodDays = 28) {
   if (!conn?.access_token) return { ok: false };
   try {
-    if (conn.platform === "tiktok") return await tiktokStats(conn, periodDays);
+    if (conn.platform === "tiktok") {
+      if (conn.api === "business") {
+        let c = conn;
+        if (isExpired(c) && c.refresh_token) {
+          c = await refreshBusiness(c);
+          await saveConnection(c);
+        }
+        return await fetchBusinessStats(c, periodDays);
+      }
+      return await tiktokStats(conn, periodDays);
+    }
     if (conn.platform === "instagram") return await instagramStats(conn, periodDays);
   } catch (e) {
     return { ok: false, error: e.message };
