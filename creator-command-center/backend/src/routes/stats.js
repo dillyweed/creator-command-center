@@ -180,7 +180,7 @@ router.post("/analyze", async (req, res) => {
     });
   }
 
-  const period = [7, 28].includes(Number(req.body?.period)) ? Number(req.body.period) : 28;
+  const period = [7, 30].includes(Number(req.body?.period)) ? Number(req.body.period) : 30;
   const base = { ...EMPTY, ...(req.body?.stats || {}) };
   const handles = {
     tiktok: String(req.body?.tiktokUsername || "").trim().replace(/^@/, ""),
