@@ -288,12 +288,49 @@ async function instagramStats(conn, periodDays) {
   const id = conn.account_id;
   const prof = await (
     await fetch(
-      `https://graph.facebook.com/${META_VER}/${id}?fields=followers_count,media_count&access_token=${conn.access_token}`
+      `https://graph.facebook.com/${META_VER}/${id}?fields=username,followers_count,media_count&access_token=${conn.access_token}`
     )
   ).json();
   const followers = Number(prof.followers_count) || 0;
+  const username = prof.username || null;
 
-  // Recent media with insights (views/engagement) over the window.
+  // Account-level total views over the window. This is the number Instagram
+  // shows in the app's "Views" dashboard (ALL content, including reels that
+  // reach non-followers). Summing individual posts badly undercounts, so we
+  // prefer this and fall back to the per-media sum only if it's unavailable.
+  let views = 0;
+  let viewsSource = "media";
+  const until = Math.floor(Date.now() / 1000);
+  const since = until - periodDays * 86400;
+  const igInsight = async (qs) => {
+    try {
+      const j = await (
+        await fetch(
+          `https://graph.facebook.com/${META_VER}/${id}/insights?${qs}&access_token=${conn.access_token}`
+        )
+      ).json();
+      if (j.error) {
+        console.warn("[ig] views insight error:", j.error?.message);
+        return null;
+      }
+      const row = (j.data || []).find((d) => d.name === "views");
+      if (row?.total_value && typeof row.total_value.value === "number") return row.total_value.value;
+      if (Array.isArray(row?.values)) return row.values.reduce((s, v) => s + (Number(v.value) || 0), 0);
+      return null;
+    } catch (e) {
+      console.warn("[ig] account views failed:", e?.message);
+      return null;
+    }
+  };
+  // Try total_value first, then a time-series sum, over the window.
+  let acct = await igInsight(`metric=views&period=day&metric_type=total_value&since=${since}&until=${until}`);
+  if (acct == null) acct = await igInsight(`metric=views&period=day&since=${since}&until=${until}`);
+  if (acct != null) {
+    views = acct;
+    viewsSource = "account";
+  }
+
+  // Recent media — used for engagement, posts/week, and a views fallback.
   const media = await (
     await fetch(
       `https://graph.facebook.com/${META_VER}/${id}/media?fields=timestamp,like_count,comments_count,media_type,insights.metric(views)&limit=25&access_token=${conn.access_token}`
@@ -303,11 +340,13 @@ async function instagramStats(conn, periodDays) {
   const cutoff = Date.now() - periodDays * 86400000;
   const recent = items.filter((m) => m.timestamp && new Date(m.timestamp).getTime() >= cutoff);
   const window = recent.length ? recent : items;
-  const viewsOf = (m) => {
-    const v = m.insights?.data?.find((x) => x.name === "views");
-    return v?.values?.[0]?.value || 0;
-  };
-  const views = window.reduce((s, m) => s + Number(viewsOf(m) || 0), 0);
+  if (viewsSource === "media") {
+    const viewsOf = (m) => {
+      const v = m.insights?.data?.find((x) => x.name === "views");
+      return v?.values?.[0]?.value || 0;
+    };
+    views = window.reduce((s, m) => s + Number(viewsOf(m) || 0), 0);
+  }
   const eng = window.filter((m) => m.like_count || m.comments_count);
   const engagement =
     followers && eng.length
@@ -323,6 +362,7 @@ async function instagramStats(conn, periodDays) {
   return {
     ok: true,
     source: "oauth",
+    username,
     followers,
     views,
     engagement,
