@@ -235,8 +235,9 @@ router.post("/analyze", async (req, res) => {
     if (r.postsPerWeek != null) merged[pf].posts = r.postsPerWeek;
     pulled[pf] = "oauth";
     const label = pf === "tiktok" ? "TikTok" : "Instagram";
+    const handle = r.username ? ` @${r.username}` : "";
     analysisParts.push(
-      `## ${label} - official API (connected account)\n` +
+      `## ${label}${handle} - official API (connected account)\n` +
         `Followers: ${fmtN(r.followers)}\n` +
         `Views (last ${period}d): ${fmtN(r.views)}\n` +
         `Engagement: ${r.engagement || 0}%\n` +
