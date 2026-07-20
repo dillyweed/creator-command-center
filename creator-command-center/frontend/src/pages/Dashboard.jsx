@@ -131,7 +131,7 @@ export default function Dashboard() {
   const [breakdown, setBreakdown] = useState(null);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [period, setPeriod] = useState(
-    () => localStorage.getItem("cc-period") || "28"
+    () => (localStorage.getItem("cc-period") === "7" ? "7" : "30")
   );
   function changePeriod(p) {
     setPeriod(p);
@@ -322,7 +322,7 @@ export default function Dashboard() {
         ) : (
           <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
             <div className="flex items-center rounded-lg border border-bd2 p-0.5" role="group" aria-label="Stats time range">
-              {["7", "28"].map((p) => (
+              {["7", "30"].map((p) => (
                 <button
                   key={p}
                   onClick={() => changePeriod(p)}
