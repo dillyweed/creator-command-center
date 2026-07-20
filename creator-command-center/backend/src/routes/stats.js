@@ -270,14 +270,20 @@ router.post("/analyze", async (req, res) => {
         : Promise.resolve({ ok: false }),
     ]);
     if (tk.ok) applyApify("tiktok", tk);
-    else if (handles.tiktok) pulled.tiktok = "failed";
+    else if (handles.tiktok && pulled.tiktok !== "oauth") pulled.tiktok = "failed";
     if (ig.ok) applyApify("instagram", ig);
-    else if (handles.instagram) pulled.instagram = "failed";
+    else if (handles.instagram && pulled.instagram !== "oauth") pulled.instagram = "failed";
   }
 
-  // 2. Web-search estimate for any platform Apify didn't cover.
+  // 2. Web-search estimate — ONLY for a platform with NO real API connection
+  //    and no successful scrape. A connected platform is locked to its
+  //    official numbers; we never mix a web-search guess into it.
   const needEstimate = ["tiktok", "instagram"].filter(
-    (pf) => handles[pf] && pulled[pf] !== "apify" && pulled[pf] !== "oauth"
+    (pf) =>
+      handles[pf] &&
+      !conns[pf] &&
+      pulled[pf] !== "apify" &&
+      pulled[pf] !== "oauth"
   );
   if (needEstimate.length && getClient()) {
     const targets = needEstimate
