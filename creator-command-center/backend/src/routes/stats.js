@@ -18,6 +18,12 @@ import {
   isConfigured as apifyConfigured,
 } from "../services/apify.js";
 import { getConnection, fetchViaConnection } from "../services/oauth.js";
+import {
+  checkAnalyzeLimit,
+  apifyBudgetOk,
+  recordApifyRuns,
+  limitsStatus,
+} from "../services/limits.js";
 
 const router = Router();
 
@@ -35,6 +41,11 @@ router.get("/status", (_req, res) => {
     instagram: igConfigured(),
     supabase: sbConfigured(),
   });
+});
+
+// Per-caller rate-limit + monthly Apify budget usage.
+router.get("/limits", (req, res) => {
+  res.json(limitsStatus(req));
 });
 
 // Latest persisted stats. When Supabase is off, returns persisted:false so the
@@ -180,6 +191,21 @@ router.post("/analyze", async (req, res) => {
     });
   }
 
+  // Per-user daily lookup cap (ANALYZE_DAILY_LIMIT, default 5). Reflect the
+  // allowance in headers on every response, and 429 once it's exhausted.
+  const rl = checkAnalyzeLimit(req);
+  res.set("X-RateLimit-Limit", String(rl.limit));
+  res.set("X-RateLimit-Remaining", String(rl.remaining));
+  res.set("X-RateLimit-Reset", rl.resetAt);
+  if (!rl.ok) {
+    return res.status(429).json({
+      error: `Daily lookup limit reached — ${rl.limit} per day. Resets ${new Date(rl.resetAt).toUTCString()}.`,
+      limit: rl.limit,
+      remaining: 0,
+      resetAt: rl.resetAt,
+    });
+  }
+
   const period = [7, 30].includes(Number(req.body?.period)) ? Number(req.body.period) : 30;
   const base = { ...EMPTY, ...(req.body?.stats || {}) };
   const handles = {
@@ -260,20 +286,22 @@ router.post("/analyze", async (req, res) => {
     }
   }
 
-  // 1. Apify next (accurate by username). Skip platforms already connected.
-  if (apifyConfigured()) {
+  // 1. Apify next (accurate by username). Skip platforms already connected,
+  //    and skip entirely once the monthly Apify spend ceiling is reached.
+  if (apifyConfigured() && apifyBudgetOk()) {
+    const runTk = Boolean(handles.tiktok) && pulled.tiktok !== "oauth";
+    const runIg = Boolean(handles.instagram) && pulled.instagram !== "oauth";
     const [tk, ig] = await Promise.all([
-      handles.tiktok && pulled.tiktok !== "oauth"
-        ? apifyTikTok(handles.tiktok, period)
-        : Promise.resolve({ ok: false }),
-      handles.instagram && pulled.instagram !== "oauth"
-        ? apifyInstagram(handles.instagram, period)
-        : Promise.resolve({ ok: false }),
+      runTk ? apifyTikTok(handles.tiktok, period) : Promise.resolve({ ok: false }),
+      runIg ? apifyInstagram(handles.instagram, period) : Promise.resolve({ ok: false }),
     ]);
+    recordApifyRuns((runTk ? 1 : 0) + (runIg ? 1 : 0));
     if (tk.ok) applyApify("tiktok", tk);
-    else if (handles.tiktok && pulled.tiktok !== "oauth") pulled.tiktok = "failed";
+    else if (runTk) pulled.tiktok = "failed";
     if (ig.ok) applyApify("instagram", ig);
-    else if (handles.instagram && pulled.instagram !== "oauth") pulled.instagram = "failed";
+    else if (runIg) pulled.instagram = "failed";
+  } else if (apifyConfigured()) {
+    console.warn("[stats/analyze] Apify skipped — monthly budget reached");
   }
 
   // 2. Web-search estimate — ONLY for a platform with NO real API connection
