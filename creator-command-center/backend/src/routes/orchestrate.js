@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { getClient, MODEL_CEO, MODEL_SUBBOT, runMessage } from "../anthropic.js";
 import { BOTS, CEO_SYSTEM, CEO_PLANNER_SYSTEM } from "../bots.js";
+import { fetchInspiration, inspirationBlock } from "../services/inspiration.js";
+import { apifyBudgetOk, recordApifyRuns } from "../services/limits.js";
 
 const router = Router();
 
@@ -71,6 +73,35 @@ router.post("/", async (req, res) => {
     }
     delegations = delegations.filter((d) => BOTS[d.bot]).slice(0, 4);
 
+    // Inspiration channels: scrape the creators the user wants to model and
+    // hand the real intel to the Research bot (budget-permitting).
+    const period = [7, 30].includes(Number(req.body?.period)) ? Number(req.body.period) : 30;
+    let intel = "";
+    let inspirationData = null;
+    try {
+      const channels = Array.isArray(req.body?.inspiration) ? req.body.inspiration : [];
+      if (channels.length && apifyBudgetOk()) {
+        inspirationData = await fetchInspiration(channels, period, { maxChannels: 8 });
+        recordApifyRuns(inspirationData.runs || 0);
+        intel = inspirationBlock(inspirationData, period);
+      }
+    } catch (e) {
+      console.warn("[orchestrate] inspiration scrape failed:", e?.message);
+    }
+    // If we got real intel, force the Research bot to run and receive it.
+    if (intel) {
+      let research = delegations.find((d) => d.bot === "research");
+      if (!research) {
+        research = {
+          bot: "research",
+          prompt: goal || "Analyze what is working for these creators and the niche right now.",
+        };
+        delegations.unshift(research);
+        delegations = delegations.slice(0, 4);
+      }
+      research.prompt = `${research.prompt}\n\n${intel}`;
+    }
+
     // 2. EXECUTE — sub-bots in parallel. Research runs with web search (step 6).
     const subAgents = await Promise.all(
       delegations.map(async (d) => {
@@ -80,7 +111,7 @@ router.post("/", async (req, res) => {
             system: bot.system,
             messages: [{ role: "user", content: d.prompt }],
             model: MODEL_SUBBOT,
-            maxTokens: 1200,
+            maxTokens: 1600,
             webSearch: Boolean(bot.webSearch),
           });
           return {
@@ -120,10 +151,13 @@ router.post("/", async (req, res) => {
             return `## ${s.name}\nTask given: ${s.prompt}\nReport:\n${s.output}${src}`;
           })
           .join("\n\n");
+      const ideasDirective = intel
+        ? "\n\nThe user maintains inspiration channels (real scraped data is in the Research report). Treat this as a content-ideas request and answer using your CONTENT-IDEAS OUTPUT structure: What's Working, 8-10 Shootable Concepts, and the Fastest Bet."
+        : "";
       const last = synthMessages[synthMessages.length - 1];
       synthMessages[synthMessages.length - 1] = {
         ...last,
-        content: last.content + contextBlock,
+        content: last.content + contextBlock + ideasDirective,
       };
     }
 
@@ -131,10 +165,10 @@ router.post("/", async (req, res) => {
       system: CEO_SYSTEM,
       messages: synthMessages,
       model: MODEL_CEO,
-      maxTokens: 1600,
+      maxTokens: 2800,
     });
 
-    res.json({ reply, subAgents });
+    res.json({ reply, subAgents, inspiration: inspirationData });
   } catch (err) {
     console.error("[orchestrate] error:", err?.message || err);
     res.status(502).json({ error: "Orchestration failed." });
