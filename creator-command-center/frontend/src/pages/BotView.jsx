@@ -31,7 +31,7 @@ export default function BotView({ botId }) {
     const dupe = inspiration.some(
       (c) => c.platform === newChan.platform && c.username.toLowerCase() === username.toLowerCase()
     );
-    if (!dupe) saveInspiration([...inspiration, { platform: newChan.platform, username }].slice(0, 8));
+    if (!dupe) saveInspiration([...inspiration, { platform: newChan.platform, username }].slice(0, 30));
     setNewChan((c) => ({ ...c, username: "" }));
   }
   function removeChannel(i) {
