@@ -280,7 +280,7 @@ export default function Dashboard() {
         `${accurate ? "Live stats pulled" : "Estimated stats"} · views = last ${period} days`
       );
     } catch (e) {
-      setSyncMsg("Analytics lookup failed (check usernames / backend)");
+      setSyncMsg(e?.message || "Analytics lookup failed (check usernames / backend)");
     } finally {
       setAnalyzing(false);
     }
