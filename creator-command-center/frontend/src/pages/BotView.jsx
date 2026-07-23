@@ -13,6 +13,30 @@ export default function BotView({ botId }) {
   const [loading, setLoading] = useState(false);
   const endRef = useRef(null);
   const inputRef = useRef(null);
+  const [inspiration, setInspiration] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("cc-inspiration") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [newChan, setNewChan] = useState({ platform: "tiktok", username: "" });
+  function saveInspiration(list) {
+    setInspiration(list);
+    localStorage.setItem("cc-inspiration", JSON.stringify(list));
+  }
+  function addChannel() {
+    const username = newChan.username.trim().replace(/^@/, "");
+    if (!username) return;
+    const dupe = inspiration.some(
+      (c) => c.platform === newChan.platform && c.username.toLowerCase() === username.toLowerCase()
+    );
+    if (!dupe) saveInspiration([...inspiration, { platform: newChan.platform, username }].slice(0, 8));
+    setNewChan((c) => ({ ...c, username: "" }));
+  }
+  function removeChannel(i) {
+    saveInspiration(inspiration.filter((_, idx) => idx !== i));
+  }
 
   // Load this bot's history whenever the route changes.
   useEffect(() => {
@@ -38,8 +62,7 @@ export default function BotView({ botId }) {
     persist([]);
   }
 
-  async function send() {
-    const text = input.trim();
+  async function runSend(text, insp = []) {
     if (!text || loading) return;
 
     const withUser = [...history, { role: "user", content: text }];
@@ -57,7 +80,7 @@ export default function BotView({ botId }) {
 
     try {
       if (botId === "ceo") {
-        const { reply, subAgents } = await orchestrate(apiMessages);
+        const { reply, subAgents } = await orchestrate(apiMessages, insp);
         persist([...withUser, { role: "assistant", content: reply, subAgents }]);
       } else {
         const { reply, sources } = await sendChat(botId, apiMessages);
@@ -69,7 +92,7 @@ export default function BotView({ botId }) {
         {
           role: "assistant",
           content:
-            "Couldn't reach the bot. Check that the backend is running and ANTHROPIC_API_KEY is set.\n\n(" +
+            "Couldn't reach the bot. Check that the backend is running and ANTHROPIC_API_KEY is set.\\n\\n(" +
             e.message +
             ")",
           error: true,
@@ -78,6 +101,18 @@ export default function BotView({ botId }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  function send() {
+    runSend(input.trim(), []);
+  }
+
+  function generateIdeas() {
+    if (loading) return;
+    runSend(
+      "Give me content ideas for this week. Analyze what's working across my inspiration channels and the niche right now, then give me shootable concepts I can film with the Meta glasses.",
+      inspiration
+    );
   }
 
   function onKeyDown(e) {
@@ -180,6 +215,73 @@ export default function BotView({ botId }) {
         )}
         <div ref={endRef} />
       </div>
+
+      {bot.orchestrator && (
+        <div className="flex-shrink-0 border-t border-bd bg-s1 px-4 pt-3 pb-1 md:px-6">
+          <div className="mb-1.5 flex items-center gap-2">
+            <i className="ti ti-bulb text-[13px] text-accent" aria-hidden="true" />
+            <span className="text-[11px] font-medium text-tp">Inspiration channels</span>
+            <span className="hidden text-[10px] text-tm sm:inline">
+              creators to model — pulled into your content ideas
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {inspiration.map((c, i) => (
+              <span
+                key={i}
+                className="flex items-center gap-1 rounded-full border border-bd2 bg-s2 px-2 py-0.5 text-[11px] text-ts"
+              >
+                <i
+                  className={`ti ${c.platform === "instagram" ? "ti-brand-instagram" : "ti-brand-tiktok"} text-[11px] text-tm`}
+                  aria-hidden="true"
+                />
+                @{c.username}
+                <button
+                  onClick={() => removeChannel(i)}
+                  className="text-tm hover:text-tp"
+                  aria-label="Remove channel"
+                >
+                  <i className="ti ti-x text-[11px]" aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+            <div className="flex items-center gap-1 rounded-full border border-bd2 bg-s2 px-1.5 py-0.5">
+              <select
+                value={newChan.platform}
+                onChange={(e) => setNewChan((c) => ({ ...c, platform: e.target.value }))}
+                className="bg-transparent text-[11px] text-ts outline-none"
+              >
+                <option value="tiktok">TikTok</option>
+                <option value="instagram">Instagram</option>
+              </select>
+              <input
+                value={newChan.username}
+                onChange={(e) => setNewChan((c) => ({ ...c, username: e.target.value.replace(/^@/, "") }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addChannel();
+                  }
+                }}
+                placeholder="username"
+                spellCheck={false}
+                autoCapitalize="none"
+                className="w-24 bg-transparent text-[11px] text-tp outline-none placeholder:text-tm"
+              />
+              <button onClick={addChannel} className="text-accent hover:opacity-80" aria-label="Add channel">
+                <i className="ti ti-plus text-[12px]" aria-hidden="true" />
+              </button>
+            </div>
+            <button
+              onClick={generateIdeas}
+              disabled={loading || inspiration.length === 0}
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
+            >
+              <i className="ti ti-sparkles text-[12px]" aria-hidden="true" /> Generate ideas
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <div className="flex-shrink-0 border-t border-bd bg-s1 px-4 md:px-6 pb-5 pt-3.5">
