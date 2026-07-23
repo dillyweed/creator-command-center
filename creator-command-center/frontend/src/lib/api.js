@@ -31,8 +31,8 @@ export function sendChat(botId, messages) {
 
 // CEO orchestration: plan -> delegate -> synthesize.
 // -> { reply, subAgents: [{ bot, name, prompt, output }] }
-export function orchestrate(messages) {
-  return post(`/api/orchestrate`, { messages });
+export function orchestrate(messages, inspiration = [], period = 30) {
+  return post(`/api/orchestrate`, { messages, inspiration, period });
 }
 
 // --- Stats (step 7) ---
