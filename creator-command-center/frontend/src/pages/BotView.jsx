@@ -21,6 +21,13 @@ export default function BotView({ botId }) {
     }
   });
   const [newChan, setNewChan] = useState({ platform: "tiktok", username: "" });
+  const [inspPeriod, setInspPeriod] = useState(
+    () => (localStorage.getItem("cc-insp-period") === "7" ? "7" : "30")
+  );
+  function changeInspPeriod(p) {
+    setInspPeriod(p);
+    localStorage.setItem("cc-insp-period", p);
+  }
   function saveInspiration(list) {
     setInspiration(list);
     localStorage.setItem("cc-inspiration", JSON.stringify(list));
@@ -62,7 +69,7 @@ export default function BotView({ botId }) {
     persist([]);
   }
 
-  async function runSend(text, insp = []) {
+  async function runSend(text, insp = [], per = 30) {
     if (!text || loading) return;
 
     const withUser = [...history, { role: "user", content: text }];
@@ -80,7 +87,7 @@ export default function BotView({ botId }) {
 
     try {
       if (botId === "ceo") {
-        const { reply, subAgents } = await orchestrate(apiMessages, insp);
+        const { reply, subAgents } = await orchestrate(apiMessages, insp, per);
         persist([...withUser, { role: "assistant", content: reply, subAgents }]);
       } else {
         const { reply, sources } = await sendChat(botId, apiMessages);
@@ -104,14 +111,15 @@ export default function BotView({ botId }) {
   }
 
   function send() {
-    runSend(input.trim(), []);
+    runSend(input.trim(), botId === "ceo" ? inspiration : [], Number(inspPeriod));
   }
 
   function generateIdeas() {
     if (loading) return;
     runSend(
       "Give me content ideas for this week. Analyze what's working across my inspiration channels and the niche right now, then give me shootable concepts I can film with the Meta glasses.",
-      inspiration
+      inspiration,
+      Number(inspPeriod)
     );
   }
 
@@ -222,8 +230,21 @@ export default function BotView({ botId }) {
             <i className="ti ti-bulb text-[13px] text-accent" aria-hidden="true" />
             <span className="text-[11px] font-medium text-tp">Inspiration channels</span>
             <span className="hidden text-[10px] text-tm sm:inline">
-              creators to model — pulled into your content ideas
+              creators to model — used on every message + Generate ideas
             </span>
+            <div className="ml-auto flex items-center rounded-md border border-bd2 p-0.5" role="group" aria-label="Outlier window">
+              {["7", "30"].map((pp) => (
+                <button
+                  key={pp}
+                  onClick={() => changeInspPeriod(pp)}
+                  className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    inspPeriod === pp ? "bg-accent text-white" : "text-ts hover:text-tp"
+                  }`}
+                >
+                  {pp}D
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {inspiration.map((c, i) => (
