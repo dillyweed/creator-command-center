@@ -99,7 +99,7 @@ router.post("/", async (req, res) => {
         delegations.unshift(research);
         delegations = delegations.slice(0, 4);
       }
-      research.prompt = `${research.prompt}\n\n${intel}`;
+      research.prompt = `${research.prompt}\n\nIMPORTANT: Analyze ONLY the creators in the INSPIRATION CHANNELS INTEL below. Do NOT search for, add, or mention any other creators or channels. Pull out the specific outlier videos with their real view counts and dates.\n\n${intel}`;
     }
 
     // 2. EXECUTE — sub-bots in parallel. Research runs with web search (step 6).
@@ -152,7 +152,7 @@ router.post("/", async (req, res) => {
           })
           .join("\n\n");
       const ideasDirective = intel
-        ? "\n\nThe user maintains inspiration channels (real scraped data is in the Research report). Treat this as a content-ideas request and answer using your CONTENT-IDEAS OUTPUT structure: What's Working, 8-10 Shootable Concepts, and the Fastest Bet."
+        ? `\n\n${intel}\n\nGROUNDING RULES (follow exactly):\n- The INSPIRATION CHANNELS INTEL above is the ONLY source of truth. It is real scraped data (view counts, dates, outlier multiples, URLs) from the exact channels the user chose to track, covering the last ${period} days.\n- Do NOT mention, list, compare, or reference ANY creator, channel, or video that is not in that intel. Never invent channels. If a specialist report names other creators, ignore them.\n- START your answer with an OUTLIERS section: list the top-performing videos from the intel over the last ${period} days. For each give the channel @handle, the view count, how many times above that channel own average it is, the post date, and the URL. Rank them highest-first.\n- THEN give your CONTENT-IDEAS OUTPUT: What is Working (the patterns behind those outliers), 8-10 Shootable Concepts modeled on the specific outlier videos, and the Fastest Bet.`
         : "";
       const last = synthMessages[synthMessages.length - 1];
       synthMessages[synthMessages.length - 1] = {
